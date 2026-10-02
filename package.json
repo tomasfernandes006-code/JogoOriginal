@@ -1,0 +1,21 @@
+{
+  "name": "o-npc",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Prototipo 3D jogavel: voce e um NPC que descobre poder quebrar o script do mundo.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && npm run build:classic",
+    "build:classic": "esbuild src/main.js --bundle --format=iife --target=es2020 --minify --outfile=vendor/o-npc.classic.js",
+    "preview": "vite preview --port 4173",
+    "smoke": "node scripts/smoke.mjs",
+    "playtest": "node scripts/playtest.mjs"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

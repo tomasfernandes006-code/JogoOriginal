@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>O NPC</title>
+    <link rel="icon" href="data:," />
+    <!--
+      CSS ligado direto no HTML (caminho relativo) e também importado em
+      src/main.js (para o Vite injetar/empacotar): em qualquer servidor a
+      interface funciona mesmo que o JavaScript não carregue.
+    -->
+    <link rel="stylesheet" href="./src/style.css" />
+    <!--
+      CSS critico inline (redundante com src/style.css): garante o layout
+      basico (canvas em tela cheia, HUD nos cantos, .hidden funcional)
+      mesmo se o <link> acima falhar por caminho/base (ex.: abrir o
+      arquivo de outra pasta ou servir o dist de outro prefixo).
+    -->
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b1220; }
+      #app { position: fixed; inset: 0; z-index: 1; }
+      #scene { position: absolute; inset: 0; display: block; width: 100vw; height: 100vh; margin: 0; z-index: 0; }
+      #label-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+      #hud { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+      #hud-top { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; }
+      #objective-panel { position: absolute; left: 14px; bottom: 14px; }
+      #controls { position: absolute; right: 14px; bottom: 14px; }
+      #glitch-overlay { position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: 0; }
+      #error-banner { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); z-index: 4; }
+      .hidden { display: none !important; }
+      #start-screen { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    </style>
+    <!--
+      Mapa de importacao: resolve os especes "three" de um servidor estatico
+      comum (sem Vite). No dev do Vite e no build os imports ja vem reescritos,
+      entao o mapa simplesmente nao e usado.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js",
+          "three/examples/jsm/": "./node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+      <div id="label-layer"></div>
+
+      <!-- HUD -->
+      <div id="hud">
+        <div id="hud-top">
+          <div class="panel" id="clock-panel">
+            <span class="panel-title">RELÓGIO DO MUNDO</span>
+            <span id="clock">06:00</span>
+            <span id="clock-phase">manhã</span>
+          </div>
+          <div class="panel" id="step-banner">
+            <span class="panel-title">OBJETIVO <span id="step-count">1/8</span></span>
+            <span id="step-row">
+              <span id="step-text">Use W A S D para andar</span>
+              <span id="step-check" class="hidden">✓</span>
+            </span>
+            <span id="step-distance" class="hidden"></span>
+          </div>
+          <div class="panel" id="suspicion-panel">
+            <span class="panel-title">SUSPEITA DOS NPCs</span>
+            <div id="suspicion-bar"><div id="suspicion-fill"></div></div>
+            <span id="suspicion-value">0%</span>
+          </div>
+        </div>
+
+        <div id="objective-panel" class="panel">
+          <span class="panel-title">OBJETIVO</span>
+          <span id="objective-text">Viva um dia normal. Vá até a praça e observe os outros NPCs.</span>
+        </div>
+
+        <div id="hint" class="hidden"></div>
+
+        <div id="help" class="hidden">
+          <span class="panel-title">CONTROLES</span>
+          <div id="help-list"></div>
+          <span class="panel-title" id="achievements-title">CONQUISTAS</span>
+          <div id="achievements-list"></div>
+          <span id="help-hint">Aperte H para fechar</span>
+        </div>
+
+        <!-- diario das pistas (tecla J) -->
+        <div id="diary" class="hidden">
+          <span class="panel-title">DIARIO</span>
+          <div id="diary-count">Anomalias: 0/5</div>
+          <div id="diary-list"></div>
+          <div id="diary-secrets-count">Segredos: 0/6</div>
+          <div id="diary-secrets"></div>
+          <span id="diary-hint">Aperte J para fechar</span>
+        </div>
+
+        <div id="prompt" class="hidden"><span id="prompt-key">E</span><span id="prompt-text"></span></div>
+        <div id="toast" class="hidden"></div>
+
+        <div id="guide-edge" class="hidden">
+          <span id="guide-edge-arrow"></span>
+          <span id="guide-edge-distance">0 m</span>
+        </div>
+
+        <!-- quadro de controles mostrado logo depois de comecar -->
+        <div id="controls-card" class="hidden">
+          <span class="panel-title">CONTROLES</span>
+          <div class="cc-row"><span class="cc-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>andar</span></div>
+          <div class="cc-row"><span class="cc-keys"><kbd>SHIFT</kbd></span><span>correr</span></div>
+          <div class="cc-row"><span class="cc-keys"><kbd>E</kbd></span><span>interagir / falar</span></div>
+          <div class="cc-row"><span class="cc-keys"><kbd>mouse</kbd></span><span>girar a camera (clique para travar)</span></div>
+          <div class="cc-row"><span class="cc-keys"><kbd>H</kbd></span><span>abrir a ajuda completa</span></div>
+        </div>
+
+        <div id="controls" class="panel">
+          <span class="panel-title">CONTROLES</span>
+          <span>WASD mover &middot; mouse girar câmera &middot; botão direito do mouse para liberar o cursor</span>
+          <span>E interagir &middot; SHIFT correr &middot; roda do mouse zoom &middot; R reiniciar</span>
+          <span>H ajuda (lista de teclas)</span>
+        </div>
+
+        <!-- painel de habilidades: Q tempo, F visao, G paredes (barra de recarga compartilhada) -->
+        <div id="power-panel" class="panel hidden">
+          <span class="panel-title">HABILIDADES</span>
+          <div id="skills-list"></div>
+          <div id="power-bar"><div id="power-fill"></div></div>
+          <span id="power-label">pronto</span>
+        </div>
+
+        <div id="mute-indicator" class="panel">SOM <kbd>M</kbd> <span id="mute-state">ligado</span></div>
+        <div id="achievement-toast" class="hidden"></div>
+      </div>
+
+      <!-- Camada de glitch -->
+      <div id="glitch-overlay"></div>
+      <!-- vinheta vermelha: a tela fica tensa com a suspeita alta -->
+      <div id="tension-vignette"></div>
+      <div id="error-banner" class="hidden">Erro: entidade fora do script detectada</div>
+
+      <!-- evento final: escolhas, cena de texto e creditos -->
+      <div id="ending-overlay" class="hidden">
+        <div id="ending-choices" class="hidden">
+          <h2>O predio se abre</h2>
+          <p class="ending-intro">Cinco objetos. Cinco pistas. O script espera a sua decisao.</p>
+          <button type="button" class="ending-choice" data-ending="A"><b>A</b> Fugir do mundo<small>Liberdade</small></button>
+          <button type="button" class="ending-choice" data-ending="B"><b>B</b> Quebrar o script de todos<small>Caos</small></button>
+          <button type="button" class="ending-choice" data-ending="C"><b>C</b> Voltar a rotina<small>Conformismo</small></button>
+          <span class="ending-keys">Teclas 1, 2 e 3 tambem escolhem</span>
+        </div>
+        <div id="ending-scene" class="hidden">
+          <p id="ending-text"></p>
+          <span id="ending-skip">clique ou Enter para continuar</span>
+        </div>
+        <div id="ending-credits" class="hidden">
+          <h2 id="credits-title">Fim</h2>
+          <div id="credits-ending"></div>
+          <div id="credits-stats"></div>
+          <button type="button" id="play-again">Jogar de novo</button>
+        </div>
+      </div>
+
+      <div id="start-screen">
+        <h1>O NPC</h1>
+        <p class="story">Voce acorda. Hoje e igual a ontem. Ou nao?</p>
+        <div class="start-buttons">
+          <button id="start-button">Comecar</button>
+          <button id="continue-button" class="hidden">Continuar</button>
+        </div>
+        <p class="small" id="start-save-note">Primeiro dia: voce acorda dentro de casa.</p>
+      </div>
+    </div>
+    <script>
+      /*
+       * Forma de carregar o jogo:
+       * - file:// (duplo clique no index.html): navegadores bloqueiam modulos ES
+       *   direto do disco, entao carregamos o bundle classico (vendor/o-npc.classic.js).
+       * - http(s): importamos os fontes via modulo ES (dev do Vite ou servidor
+       *   estatico com o mapa de importacao acima). Se o modulo falhar por
+       *   qualquer motivo, o bundle classico entra como seguranca.
+       */
+      (function bootstrapONpc() {
+        function loadClassic() {
+          if (window.__oNpcClassicRequested) return;
+          window.__oNpcClassicRequested = true;
+          var fromDist = /\/dist\//.test(location.pathname);
+          var script = document.createElement('script');
+          script.src = (fromDist ? '..' : '.') + '/vendor/o-npc.classic.js';
+          document.body.appendChild(script);
+        }
+
+        if (location.protocol === 'file:') {
+          loadClassic();
+          return;
+        }
+
+        window.addEventListener('error', function (event) {
+          var target = event.target;
+          if (target && target.tagName === 'SCRIPT' && target.type === 'module') loadClassic();
+        }, true);
+        window.addEventListener('unhandledrejection', function (event) {
+          var message = String((event.reason && event.reason.message) || event.reason || '');
+          if (/import|module|mime|chunk/i.test(message)) loadClassic();
+        });
+      })();
+    </script>
+    <script type="module">
+      if (location.protocol !== 'file:') import('./src/main.js');
+    </script>
+  </body>
+</html>
